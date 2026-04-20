@@ -259,12 +259,12 @@ async def set_username(data: UsernameRequest):
 
     # Initialize user points to 0
     if data.username not in state.users:
-        state.users[data.username] = 0
+        state.users[data.username] = 100
 
     # Persist to DB (non-blocking)
     if db_available:
         asyncio.create_task(asyncio.to_thread(
-            _db_upsert_user, data.email, data.username, 0
+            _db_upsert_user, data.email, data.username, 100
         ))
 
     return {"username": data.username, "email": data.email}
@@ -659,6 +659,16 @@ async def get_state(auth=Depends(verify_token)):
 
 
 # =========================
+#   GET LEADERBOARD (PUBLIC)
+# =========================
+
+@app.get("/leaderboard")
+async def get_public_leaderboard():
+    """Public leaderboard endpoint."""
+    return dict(state.users)
+
+
+# =========================
 #   GET LEADERBOARD (ADMIN ONLY)
 # =========================
 
@@ -716,6 +726,7 @@ async def websocket_endpoint(ws: WebSocket, role: str = "user"):
         "question": state.current_question,
         "round_type": state.round_type,
         "responses": state.responses,
+        "users": dict(state.users),  # include points so client shows login bonus immediately
     }
     await ws.send_json(init_message)
 

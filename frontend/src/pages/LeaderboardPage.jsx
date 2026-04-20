@@ -1,149 +1,173 @@
-import React, { useState } from 'react';
-import { useSyncEngine } from '../hooks/useSyncEngine';
+import React, { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { Trophy, Medal, Star, ArrowLeft } from 'lucide-react';
+
+const API_BASE = "http://localhost:8000";
 
 const LeaderboardPage = () => {
-  const syncState = useSyncEngine();
-  const [viewRound, setViewRound] = useState(0);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [password, setPassword] = useState('');
+  const [standings, setStandings] = useState({});
+  const [loading, setLoading] = useState(true);
 
-  const roundData = syncState.rounds[viewRound];
-  const questions = roundData?.questions || [];
-  const latestQuestion = questions[questions.length - 1] || { clicks: [] };
+  useEffect(() => {
+    fetchStandings();
+    const interval = setInterval(fetchStandings, 1000); // Updated to max (1s polling)
+    return () => clearInterval(interval);
+  }, []);
 
-  // Calculate ranks based on total points
-  const participantsList = Object.keys(syncState.participants).map(sapId => {
-    const p = syncState.participants[sapId];
+  const fetchStandings = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/leaderboard`);
+      const data = await res.json();
+      setStandings(data);
+    } catch (e) {
+      console.error("Failed to fetch standings");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    // Find buzz time for latest question in this round
-    const buzz = latestQuestion.clicks.find(c => c.sapId === sapId);
-    const msDelta = buzz ? buzz.msDelta : Infinity;
-
-    return {
-      sapId,
-      ...p,
-      msDelta
-    };
-  });
-
-  // Sort by points descending, then by buzz time ascending
-  participantsList.sort((a, b) => {
-    if (b.points !== a.points) return b.points - a.points;
-    return a.msDelta - b.msDelta;
-  });
-
-  if (!isAuthenticated) {
-    return (
-      <div className="arena-box" style={{ maxWidth: '400px', width: '95%', padding: '2rem', marginTop: '10vh' }}>
-        <h2 className="title" style={{ fontSize: '2rem', textShadow: 'var(--neon-cyan)', marginBottom: '1.5rem' }}>RESTRICTED ACCESS</h2>
-        <form onSubmit={(e) => { e.preventDefault(); if (password === 'ieee2025') setIsAuthenticated(true); else alert('Incorrect Password'); }}>
-          <input
-            type="password"
-            className="input-field"
-            placeholder="Enter Admin Password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            style={{ width: '100%', marginBottom: '1rem', padding: '0.8rem 1.2rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.05)', color: 'white' }}
-          />
-          <button type="submit" className="capsule-btn" style={{ width: '100%' }}>UNLOCK LEADERBOARD</button>
-        </form>
-      </div>
-    );
-  }
+  const sortedUsers = Object.entries(standings)
+    .sort(([, a], [, b]) => b - a)
+    .map(([name, points]) => ({ name, points }));
 
   return (
-    <div className="arena-box" style={{ maxWidth: '850px', width: '95%', height: 'auto', maxHeight: '100%', flex: 1, padding: '1.5rem', marginTop: '3rem', display: 'flex', flexDirection: 'column' }}>
-      <h1 className="title" style={{ fontSize: 'clamp(2rem, 5vh, 3rem)', textShadow: 'var(--neon-magenta)', marginBottom: '1rem', flexShrink: 0 }}>
-        GLOBAL STANDINGS
-      </h1>
+    <div className="leaderboard-container">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="glass-card l-card"
+      >
+        <div className="l-header">
+          <Trophy className="gold" size={48} />
+          <h1 className="l-title">BUZZERVERSE ELITE</h1>
+          <p className="l-subtitle">GLOBAL HALL OF FAME</p>
+        </div>
 
-      {/* Navbar for Rounds */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '1.5rem', justifyContent: 'center', flexShrink: 0 }}>
-        {[0, 1, 2].map(i => (
-          <button
-            key={i}
-            onClick={() => setViewRound(i)}
-            style={{
-              padding: '0.6rem 1.5rem',
-              background: viewRound === i ? 'var(--gta-magenta)' : 'transparent',
-              color: viewRound === i ? 'white' : 'var(--gta-cyan)',
-              border: `2px solid ${viewRound === i ? 'var(--gta-magenta)' : 'rgba(34, 211, 238, 0.3)'}`,
-              borderRadius: '20px',
-              cursor: 'pointer',
-              fontWeight: 800,
-              fontSize: '1rem',
-              transition: 'all 0.3s'
-            }}
-          >
-            {syncState.rounds[i].name.toUpperCase()}
-          </button>
-        ))}
-      </div>
-
-      <div style={{ background: 'rgba(0,0,0,0.25)', padding: '1.25rem', borderRadius: '20px', marginBottom: '1rem', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div className="log-card" style={{ flex: 1, overflowY: 'auto', margin: 0, background: 'transparent' }}>
-          <div className="log-item" style={{ 
-            display: 'grid', 
-            gridTemplateColumns: syncState.showPointsOnLeaderboard ? '50px 60px 1fr 100px 80px' : '50px 60px 1fr 100px', 
-            gap: '10px', 
-            paddingBottom: '0.8rem', 
-            borderBottom: '1px solid rgba(255,255,255,0.1)', 
-            opacity: 0.5, 
-            fontSize: '0.65rem', 
-            fontWeight: 800 
-          }}>
-            <div style={{ textAlign: 'center' }}>RANK</div>
-            <div style={{ textAlign: 'center' }}>PROFILE</div>
-            <div>PARTICIPANT</div>
-            <div style={{ textAlign: 'right' }}>SPEED</div>
-            {syncState.showPointsOnLeaderboard && (
-              <div style={{ textAlign: 'right', color: '#ffd700' }}>POINTS</div>
-            )}
+        <div className="l-stats">
+          <div className="l-stat">
+            <span className="l-label">TOTAL CONTENDERS</span>
+            <span className="l-value">{sortedUsers.length}</span>
           </div>
+        </div>
 
-          {participantsList.length === 0 ? (
-            <div style={{ padding: '3rem', textAlign: 'center', opacity: 0.5 }}>NO PARTICIPANTS YET</div>
+        <div className="l-list">
+          {loading ? (
+            <div className="l-loading">FETCHING DATA...</div>
+          ) : sortedUsers.length === 0 ? (
+            <div className="l-empty">NO DATA IN THE ARCHIVES</div>
           ) : (
-            participantsList.map((p, index) => (
-              <div key={p.sapId} className="log-item" style={{
-                display: 'grid',
-                gridTemplateColumns: syncState.showPointsOnLeaderboard ? '50px 60px 1fr 100px 80px' : '50px 60px 1fr 100px',
-                gap: '10px',
-                alignItems: 'center',
-                padding: '10px 8px',
-                borderBottom: '1px solid rgba(255,255,255,0.05)',
-                background: index === 0 ? 'linear-gradient(90deg, rgba(255,215,0,0.1) 0%, transparent 100%)' : 'rgba(255,255,255,0.02)',
-                borderLeft: index === 0 ? '3px solid #ffd700' : (index === 1 ? '3px solid #c0c0c0' : (index === 2 ? '3px solid #cd7f32' : '3px solid transparent'))
-              }}>
-                <div style={{ textAlign: 'center', fontWeight: 800, color: index === 0 ? '#ffd700' : (index === 1 ? '#c0c0c0' : (index === 2 ? '#cd7f32' : 'white')), fontSize: '1.2rem', opacity: 0.8 }}>
-                  #{index + 1}
+            sortedUsers.map((user, index) => (
+              <motion.div 
+                initial={{ x: -20, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                transition={{ delay: index * 0.05 }}
+                key={user.name} 
+                className={`l-item rank-${index + 1}`}
+              >
+                <div className="l-rank">
+                  {index === 0 ? <Medal size={24} color="#fbbf24" /> : 
+                   index === 1 ? <Medal size={24} color="#94a3b8" /> : 
+                   index === 2 ? <Medal size={24} color="#b45309" /> : 
+                   `#${index + 1}`}
                 </div>
-                <div style={{ textAlign: 'center', fontSize: '1.8rem' }}>
-                  {p.profilePic}
+                <div className="l-info">
+                  <span className="l-name">{user.name}</span>
+                  <span className="l-badge">VERIFIED PLAYER</span>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ fontWeight: 800, color: index === 0 ? '#ffd700' : 'white', fontSize: '0.9rem' }}>{p.name}</span>
-                  <span style={{ fontSize: '0.6rem', opacity: 0.4 }}>{p.sapId}</span>
+                <div className="l-points">
+                  <span className="p-val">{user.points}</span>
+                  <span className="p-unit">PTS</span>
                 </div>
-                <div style={{ textAlign: 'right', fontWeight: 700, fontFamily: 'monospace', color: p.msDelta !== Infinity ? 'var(--success-green)' : 'rgba(255,255,255,0.2)', fontSize: '0.85rem' }}>
-                  {p.msDelta !== Infinity ? `+${(p.msDelta / 1000).toFixed(3)}s` : '---'}
-                </div>
-                {syncState.showPointsOnLeaderboard && (
-                  <div style={{ textAlign: 'right', fontWeight: 900, fontSize: '1.1rem', color: '#ffd700' }}>
-                    {p.points}
-                  </div>
-                )}
-              </div>
+              </motion.div>
             ))
           )}
         </div>
-      </div>
+      </motion.div>
 
-      <div style={{ textAlign: 'center', marginTop: '1rem', opacity: 0.5, fontSize: '0.8rem', flexShrink: 0 }}>
-        Question {questions.length} / Status: {roundData.status.toUpperCase()}
-      </div>
+      <style>{`
+        .leaderboard-container {
+          width: 100%;
+          max-width: 600px;
+          margin: 0 auto;
+          padding: 2rem 1rem;
+        }
+        .l-card {
+          padding: 2.5rem;
+          border-radius: 30px;
+          display: flex;
+          flex-direction: column;
+          gap: 2rem;
+        }
+        .l-header {
+          text-align: center;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 0.5rem;
+        }
+        .l-title {
+          font-family: 'Bangers';
+          font-size: 3rem;
+          letter-spacing: 4px;
+          background: linear-gradient(to bottom, #fff, #94a3b8);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+        .l-subtitle {
+          font-size: 0.7rem;
+          font-weight: 900;
+          letter-spacing: 5px;
+          color: var(--accent-primary);
+          opacity: 0.8;
+        }
+        .l-stats {
+          display: flex;
+          justify-content: center;
+          border-top: 1px solid rgba(255,255,255,0.05);
+          border-bottom: 1px solid rgba(255,255,255,0.05);
+          padding: 1rem 0;
+        }
+        .l-stat {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+        }
+        .l-label { font-size: 0.6rem; font-weight: 900; opacity: 0.4; letter-spacing: 2px; }
+        .l-value { font-weight: 900; font-size: 1.2rem; }
+
+        .l-list {
+          display: flex;
+          flex-direction: column;
+          gap: 0.75rem;
+        }
+        .l-item {
+          display: flex;
+          align-items: center;
+          gap: 1.5rem;
+          padding: 1.25rem 1.5rem;
+          background: rgba(255,255,255,0.02);
+          border-radius: 16px;
+          border: 1px solid rgba(255,255,255,0.05);
+          transition: transform 0.2s;
+        }
+        .l-item:hover {
+          transform: translateX(10px);
+          background: rgba(255,255,255,0.05);
+        }
+        .l-item.rank-1 { background: rgba(251, 191, 36, 0.05); border-color: rgba(251, 191, 36, 0.2); }
+        .l-rank { width: 40px; font-weight: 900; font-size: 1.1rem; opacity: 0.5; text-align: center; }
+        .l-info { flex: 1; display: flex; flex-direction: column; }
+        .l-name { font-weight: 800; font-size: 1.1rem; }
+        .l-badge { font-size: 0.5rem; font-weight: 900; letter-spacing: 1px; color: var(--accent-secondary); margin-top: 2px; }
+        .l-points { display: flex; align-items: baseline; gap: 4px; }
+        .p-val { font-weight: 900; font-size: 1.5rem; color: #fbbf24; }
+        .p-unit { font-size: 0.6rem; font-weight: 800; opacity: 0.6; }
+        
+        .l-loading, .l-empty { text-align: center; padding: 3rem; opacity: 0.3; font-weight: 900; letter-spacing: 2px; }
+      `}</style>
     </div>
   );
 };
 
 export default LeaderboardPage;
+
