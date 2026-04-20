@@ -1,5 +1,5 @@
 // src/shared/socket.js
-const WS_URL = "ws://localhost:8000/ws";
+const WS_URL = "wss://deployment.zapto.org/ws";
 
 class SocketManager {
     constructor() {
