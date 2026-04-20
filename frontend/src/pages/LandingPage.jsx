@@ -13,7 +13,7 @@ const GoogleLogo = () => (
   </svg>
 );
 
-const API_BASE = "https://deployment.zapto.org/";
+const API_BASE = "https://deployment.zapto.org";
 
 const LandingPage = (props) => {
   const { onLogin } = props;

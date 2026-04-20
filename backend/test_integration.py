@@ -5,7 +5,7 @@ Tests: admin login, enable, buzz, evaluate, reset scoring, conclude.
 import json
 import urllib.request
 
-BASE = "https://deployment.zapto.org/"
+BASE = "https://deployment.zapto.org"
 
 def post(path, body=None, token=None):
     data = json.dumps(body).encode() if body else None

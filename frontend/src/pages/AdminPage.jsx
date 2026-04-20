@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { socketManager } from '../shared/socket';
 import { Play, Square, RotateCcw, CheckCircle, XCircle, Users, X, LogOut } from 'lucide-react';
 
-const API_BASE = "https://deployment.zapto.org/";
+const API_BASE = "https://deployment.zapto.org";
 
 const AdminPage = ({ userData, onLogout }) => {
   const [gameState, setGameState] = useState({
