@@ -39,7 +39,7 @@ const AdminPage = () => {
   const sortedClicks = [...roundData.clicks].sort((a, b) => a.msDelta - b.msDelta);
 
   return (
-    <div className="arena-box" style={{ maxWidth: '850px', width: '95%', height: 'auto', maxHeight: '90vh' }}>
+    <div className="arena-box" style={{ maxWidth: '850px', width: '95%', height: 'auto', maxHeight: '90vh', marginRight: '1rem' }}>
       <h1 className="title" style={{ fontSize: 'clamp(1.5rem, 5vh, 2.5rem)', marginBottom: '1rem' }}>TOURNAMENT DASHBOARD</h1>
 
       {/* Round Selection Tabs - Compact & Focused */}

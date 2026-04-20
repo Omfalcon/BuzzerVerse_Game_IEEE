@@ -42,6 +42,8 @@ const LandingPage = ({ onLogin }) => {
       ) : (
         <form onSubmit={handleSubmit} style={{ padding: '1rem 0' }}>
           <p className="subtitle" style={{ fontWeight: 700, color: 'var(--gta-cyan)' }}>{role === 'user' ? 'JOIN TOURNAMENT' : 'ADMIN AUTH'}</p>
+          <br></br>
+          <br></br>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem' }}>
             {role === 'user' ? (
