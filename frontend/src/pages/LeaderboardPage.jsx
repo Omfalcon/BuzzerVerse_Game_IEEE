@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Trophy, Medal, Star, ArrowLeft } from 'lucide-react';
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = "https://deployment.zapto.org/";
 
 const LeaderboardPage = () => {
   const [standings, setStandings] = useState({});
