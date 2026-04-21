@@ -1,61 +1,14 @@
-// src/shared/socket.js
-const WS_URL = "wss://deployment.zapto.org/ws";
+import { io } from 'socket.io-client';
 
-class SocketManager {
-    constructor() {
-        this.socket = null;
-        this.listeners = new Set();
-        this.reconnectAttempts = 0;
-        this.role = 'user';
-        this.name = '';
-    }
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 
-    connect(role = 'user', name = '') {
-        this.role = role;
-        this.name = name;
-        const url = `${WS_URL}?role=${role}`;
-        
-        if (this.socket) {
-            this.socket.close();
-        }
+const socket = io(BACKEND_URL, {
+  autoConnect: false,
+  transports: ['websocket', 'polling'],
+  reconnection: true,
+  reconnectionAttempts: 15,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 5000,
+});
 
-        this.socket = new WebSocket(url);
-
-        this.socket.onopen = () => {
-            console.log(`[WS] Connected as ${role}`);
-            this.reconnectAttempts = 0;
-        };
-
-        this.socket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            this.listeners.forEach(listener => listener(data));
-        };
-
-        this.socket.onclose = () => {
-            console.log("[WS] Disconnected. Reconnecting...");
-            if (this.reconnectAttempts < 5) {
-                setTimeout(() => {
-                    this.reconnectAttempts++;
-                    this.connect(this.role, this.name);
-                }, 2000);
-            }
-        };
-    }
-
-    send(data) {
-        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-            this.socket.send(JSON.stringify(data));
-        }
-    }
-
-    subscribe(callback) {
-        this.listeners.add(callback);
-        return () => this.listeners.delete(callback);
-    }
-
-    buzz(name) {
-        this.send({ type: 'buzz', name });
-    }
-}
-
-export const socketManager = new SocketManager();
+export default socket;

@@ -1,379 +1,253 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { LogOut } from 'lucide-react';
-import { socketManager } from '../shared/socket';
-import WastedOverlay from '../components/WastedOverlay';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import socket from '../shared/socket';
 
-const UserPage = ({ userData, onLogout }) => {
+export default function UserPage({ user, onLogout, updatePoints }) {
   const [gameState, setGameState] = useState({
-    is_active: false,
-    current_question: 'q1',
+    buzzer_active: false,
+    question_number: 1,
     round_type: 'frontend',
     responses: [],
-    users: {}
+    evaluations: {},
+    game_active: true,
   });
-  const [wasted, setWasted] = useState({ show: false, text: '' });
-  const [frozen, setFrozen] = useState(false);
-  // ref so space-bar handler always has fresh state without re-registering
-  const stateRef = useRef({ is_active: false, frozen: false, hasBuzzed: false });
+  const [hasBuzzed, setHasBuzzed] = useState(false);
+  const [points, setPoints] = useState(user.points);
+  const [scoreDelta, setScoreDelta] = useState(null);
+  const [gameEnded, setGameEnded] = useState(false);
+  const [finalLeaderboard, setFinalLeaderboard] = useState(null);
+  const deltaTimer = useRef(null);
+
+  // Keep a ref so spacebar handler never has stale closure
+  const canBuzzRef = useRef(false);
+  canBuzzRef.current = gameState.buzzer_active && !hasBuzzed;
+
+  const handleBuzz = useCallback(async () => {
+    if (!canBuzzRef.current) return;
+    setHasBuzzed(true);
+    try {
+      const idToken = await user.fbUser.getIdToken();
+      socket.emit('buzz', { id_token: idToken });
+    } catch {
+      setHasBuzzed(false);
+    }
+  }, [user.fbUser]);
 
   useEffect(() => {
-    socketManager.connect('user', userData.name);
+    const onGameState = (state) => {
+      setGameState(state);
+      // Reset hasBuzzed if our email is no longer in the response list (new round)
+      const stillIn = state.responses.some(r => r.email === user.email);
+      if (!stillIn) setHasBuzzed(false);
+    };
 
-    const unsubscribe = socketManager.subscribe((data) => {
-      if (data.type === 'init') {
-        setGameState(prev => ({ ...prev, ...data }));
-      } else if (data.type === 'state') {
-        setGameState(prev => ({ ...prev, is_active: data.is_active }));
-        if (!data.is_active) setFrozen(false);
-      } else if (data.type === 'reset') {
-        setFrozen(false);
-        setGameState(prev => ({
-          ...prev,
-          current_question: data.question,
-          responses: [],
-          is_active: false
-        }));
-      } else if (data.type === 'new_buzz') {
-        setGameState(prev => ({ ...prev, responses: [...prev.responses, data.data] }));
-      } else if (data.type === 'points_update') {
-        setGameState(prev => ({ ...prev, users: data.users }));
-      } else if (data.type === 'round_type') {
-        setFrozen(false);
-        setGameState(prev => ({ ...prev, round_type: data.value, current_question: 'q1' }));
+    const onRoundReset = ({ score_deltas, game_state }) => {
+      setGameState(game_state);
+      setHasBuzzed(false);
+      const delta = score_deltas[user.email];
+      if (delta !== undefined) {
+        setScoreDelta(delta);
+        setPoints(prev => {
+          const next = prev + delta;
+          updatePoints(next);
+          return next;
+        });
+        if (deltaTimer.current) clearTimeout(deltaTimer.current);
+        deltaTimer.current = setTimeout(() => setScoreDelta(null), 3500);
       }
-    });
+    };
 
-    return () => unsubscribe();
-  }, [userData.name]);
+    const onGameEnded = ({ leaderboard }) => {
+      setGameEnded(true);
+      setFinalLeaderboard(leaderboard);
+    };
 
-  const hasBuzzed = gameState.responses.some(r => r.name === userData.name);
-  const myPoints = gameState.users[userData.name] ?? 0;
+    socket.on('game_state', onGameState);
+    socket.on('round_reset', onRoundReset);
+    socket.on('game_ended', onGameEnded);
 
-  // keep ref in sync so space handler is always current
+    return () => {
+      socket.off('game_state', onGameState);
+      socket.off('round_reset', onRoundReset);
+      socket.off('game_ended', onGameEnded);
+      if (deltaTimer.current) clearTimeout(deltaTimer.current);
+    };
+  }, [user.email, updatePoints]);
+
+  // Spacebar buzzer
   useEffect(() => {
-    stateRef.current = { is_active: gameState.is_active, frozen, hasBuzzed };
-  }, [gameState.is_active, frozen, hasBuzzed]);
-
-  const fireBuzz = () => {
-    const { is_active, frozen: fr, hasBuzzed: hb } = stateRef.current;
-    if (!is_active || fr || hb) return;
-    socketManager.buzz(userData.name);
-    setFrozen(true);
-    const t = ['TAGGED', 'BUSTED', 'WASTED', 'SMASHED'];
-    setWasted({ show: true, text: t[Math.floor(Math.random() * t.length)] });
-    setTimeout(() => setWasted(p => ({ ...p, show: false })), 1800);
-  };
-
-  // single, stable keydown listener
-  useEffect(() => {
-    const onKey = (e) => { if (e.code === 'Space') { e.preventDefault(); fireBuzz(); } };
+    const onKey = (e) => {
+      if (e.code === 'Space' && !e.repeat) {
+        e.preventDefault();
+        if (canBuzzRef.current) handleBuzz();
+      }
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);   // intentionally empty — uses ref
+  }, [handleBuzz]);
 
-  const locked = frozen || hasBuzzed;
+  const myRank = gameState.responses.findIndex(r => r.email === user.email) + 1;
 
+  const roundColors = { frontend: '#3b82f6', backend: '#10b981', mystery: '#8b5cf6' };
+  const roundColor = roundColors[gameState.round_type] || '#3b82f6';
+
+  // ── Game Over screen ──────────────────────────────────────────────────────
+  if (gameEnded) {
+    return (
+      <div style={{ minHeight: '100vh', padding: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ fontFamily: 'Bangers', fontSize: '3.5rem', letterSpacing: '6px', background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent', marginBottom: '0.5rem' }}>
+          GAME OVER
+        </div>
+        <p style={{ color: 'var(--text-muted)', marginBottom: '2rem', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '3px' }}>Final Standings</p>
+        <div style={{ width: '100%', maxWidth: '480px' }}>
+          {finalLeaderboard?.map((u, i) => (
+            <div key={u.username} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.875rem 1.25rem', background: u.username === user.username ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.03)', border: `1px solid ${u.username === user.username ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.06)'}`, borderRadius: '12px', marginBottom: '0.5rem' }}>
+              <span style={{ fontSize: '1.25rem', minWidth: '32px' }}>{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}</span>
+              <span style={{ flex: 1, fontWeight: 700 }}>{u.username}</span>
+              <span style={{ color: '#fbbf24', fontWeight: 900, fontFamily: 'Bangers', fontSize: '1.25rem', letterSpacing: '1px' }}>{u.points}</span>
+            </div>
+          ))}
+        </div>
+        <button onClick={onLogout} style={{ marginTop: '2rem', padding: '0.75rem 2rem', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'var(--text-muted)', borderRadius: '10px', cursor: 'pointer', fontSize: '0.85rem' }}>
+          Leave
+        </button>
+      </div>
+    );
+  }
+
+  // ── Main UI ───────────────────────────────────────────────────────────────
   return (
-    <div className="up-wrap">
-      <WastedOverlay show={wasted.show} text={wasted.text} />
+    <div style={{ minHeight: '100vh', padding: '1.5rem', maxWidth: '560px', margin: '0 auto' }}>
 
-      {/* ── Header bar ── */}
-      <header className="up-bar">
-        <div className="up-player-block">
-          <div className="up-avatar">{userData.name.charAt(0).toUpperCase()}</div>
-          <div>
-            <div className="up-lbl">PLAYER</div>
-            <div className="up-pname">{userData.name}</div>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.75rem' }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+            <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: roundColor, boxShadow: `0 0 6px ${roundColor}` }} />
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '2px' }}>
+              {gameState.round_type} round
+            </span>
           </div>
+          <h2 style={{ fontFamily: 'Bangers', fontSize: '1.6rem', letterSpacing: '2px' }}>
+            Q{gameState.question_number} · {user.username}
+          </h2>
         </div>
 
-        <div className="up-mid-block">
-          <div className="up-lbl">QUESTION</div>
-          <div className="up-qbig">{gameState.current_question.toUpperCase()}</div>
-        </div>
-
-        <div className="up-right-block">
-          <div className="up-lbl">POINTS</div>
-          <div className="up-pts">🪙 {myPoints}</div>
-          <button className="up-logout-btn" onClick={onLogout} title="Log Out">
-            <LogOut size={16} />
-          </button>
-        </div>
-      </header>
-
-      {/* ── Round + Question big display ── */}
-      <div className="up-rq-block">
-        <div className="up-round-big">{gameState.round_type.toUpperCase()} ROUND</div>
-        <div className="up-question-big">QUESTION {gameState.current_question.toUpperCase()}</div>
-        <div className="up-status-pip">
-          <span className="up-round-dot" style={{ background: gameState.is_active ? '#10b981' : '#6b7280' }} />
-          <span className="up-status-txt">{gameState.is_active ? 'LIVE' : 'WAITING'}</span>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'flex-end' }}>
+            <span style={{ color: '#fbbf24', fontFamily: 'Bangers', fontSize: '1.75rem', letterSpacing: '1px' }}>{points}</span>
+            {scoreDelta !== null && (
+              <span style={{
+                color: scoreDelta >= 0 ? '#10b981' : '#ef4444',
+                fontWeight: 900, fontSize: '1rem',
+                animation: 'scorePop 0.4s ease',
+              }}>
+                {scoreDelta >= 0 ? `+${scoreDelta}` : scoreDelta}
+              </span>
+            )}
+          </div>
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '2px' }}>pts</div>
         </div>
       </div>
 
-      {/* ── Buzzer stage ── */}
-      <main className="up-stage">
-        {!gameState.is_active ? (
-          <div className="up-idle">
-            <div className="up-ring r1" />
-            <div className="up-ring r2" />
-            <div className="up-ring r3" />
-            <div className="up-idle-core" />
-            <p className="up-idle-txt">Waiting for host to start...</p>
-          </div>
-        ) : (
-          <div className="up-buzzer-wrap">
-            <button
-              className={`up-buzzer ${locked ? 'locked' : 'ready'}`}
-              onClick={fireBuzz}
-              disabled={locked}
-            >
-              <span className="up-bzlabel">{locked ? 'LOCKED' : 'BUZZ!'}</span>
-            </button>
-            <p className="up-hint">
-              {locked ? '✓ Signal registered — waiting for result' : 'TAP BUTTON  ·  OR PRESS SPACE'}
-            </p>
-          </div>
-        )}
-      </main>
+      {/* Status pill */}
+      <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+          padding: '0.35rem 1.25rem',
+          borderRadius: '999px',
+          background: gameState.buzzer_active ? 'rgba(16,185,129,0.12)' : 'rgba(107,114,128,0.12)',
+          border: `1px solid ${gameState.buzzer_active ? '#10b981' : '#6b7280'}`,
+          color: gameState.buzzer_active ? '#10b981' : 'var(--text-muted)',
+          fontSize: '0.7rem', fontWeight: 800, letterSpacing: '3px', textTransform: 'uppercase',
+        }}>
+          <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: 'currentColor', ...(gameState.buzzer_active ? { boxShadow: '0 0 4px #10b981', animation: 'pulse 1.5s infinite' } : {}) }} />
+          {gameState.buzzer_active ? 'BUZZER LIVE' : 'WAITING'}
+        </span>
+      </div>
 
-      {/* ── Signal feed ── */}
-      <section className="up-feed">
-        <div className="up-feed-hdr">⚡ LIVE SIGNALS</div>
-        {gameState.responses.length === 0 ? (
-          <p className="up-feed-empty">No signals yet…</p>
-        ) : (
-          gameState.responses.map((r, i) => (
-            <div key={i} className={`up-feed-row ${r.name === userData.name ? 'mine' : ''}`}>
-              <span className="up-feed-rank">#{i + 1}</span>
-              <span className="up-feed-name">{r.name}</span>
-              {r.name === userData.name && <span className="up-feed-you">YOU</span>}
-            </div>
-          ))
-        )}
-      </section>
+      {/* Big Buzzer Button */}
+      <div style={{ display: 'flex', justifyContent: 'center', margin: '2rem 0 1rem' }}>
+        <button
+          onClick={handleBuzz}
+          disabled={!gameState.buzzer_active || hasBuzzed}
+          style={{
+            width: '210px', height: '210px',
+            borderRadius: '50%',
+            border: 'none',
+            cursor: gameState.buzzer_active && !hasBuzzed ? 'pointer' : 'not-allowed',
+            background: hasBuzzed
+              ? 'linear-gradient(135deg, #065f46, #047857)'
+              : gameState.buzzer_active
+                ? 'linear-gradient(135deg, #dc2626, #b91c1c)'
+                : 'rgba(55,65,81,0.4)',
+            color: 'white',
+            fontFamily: 'Bangers',
+            fontSize: hasBuzzed ? '1.5rem' : '2.5rem',
+            letterSpacing: '3px',
+            boxShadow: gameState.buzzer_active && !hasBuzzed
+              ? '0 0 50px rgba(220,38,38,0.45), 0 0 100px rgba(220,38,38,0.15), inset 0 2px 4px rgba(255,255,255,0.1)'
+              : hasBuzzed
+                ? '0 0 30px rgba(5,150,105,0.3)'
+                : 'none',
+            transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)',
+            transform: hasBuzzed ? 'scale(0.93)' : 'scale(1)',
+            outline: 'none',
+          }}
+          onMouseDown={e => { if (!hasBuzzed && gameState.buzzer_active) e.currentTarget.style.transform = 'scale(0.96)'; }}
+          onMouseUp={e => { e.currentTarget.style.transform = hasBuzzed ? 'scale(0.93)' : 'scale(1)'; }}
+        >
+          {hasBuzzed ? `RANK #${myRank}` : 'BUZZ'}
+        </button>
+      </div>
+
+      <p style={{ textAlign: 'center', color: '#4b5563', fontSize: '0.72rem', marginBottom: '2rem', height: '1rem' }}>
+        {gameState.buzzer_active && !hasBuzzed ? 'Click or press SPACE to buzz' : ''}
+      </p>
+
+      {/* Signal Feed */}
+      {gameState.responses.length > 0 && (
+        <div>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '2px', marginBottom: '0.75rem', fontWeight: 700 }}>
+            Signal Feed
+          </p>
+          {gameState.responses.map((r) => {
+            const isMe = r.email === user.email;
+            const evaluation = gameState.evaluations[r.email];
+            return (
+              <div key={r.email} style={{
+                display: 'flex', alignItems: 'center', gap: '0.75rem',
+                padding: '0.75rem 1rem',
+                background: isMe ? 'rgba(59,130,246,0.08)' : 'rgba(255,255,255,0.025)',
+                border: `1px solid ${isMe ? 'rgba(59,130,246,0.25)' : 'rgba(255,255,255,0.05)'}`,
+                borderRadius: '10px', marginBottom: '0.5rem',
+              }}>
+                <span style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: r.rank <= 3 ? 'rgba(251,191,36,0.12)' : 'rgba(255,255,255,0.05)', color: r.rank <= 3 ? '#fbbf24' : 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 800 }}>
+                  #{r.rank}
+                </span>
+                <span style={{ flex: 1, fontWeight: isMe ? 700 : 400 }}>{r.username}</span>
+                {isMe && <span style={{ fontSize: '0.65rem', color: '#3b82f6', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>YOU</span>}
+                {evaluation && (
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: evaluation === 'correct' ? '#10b981' : '#ef4444' }}>
+                    {evaluation === 'correct' ? '✓' : '✗'}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Logout */}
+      <div style={{ textAlign: 'center', marginTop: '3rem', paddingBottom: '2rem' }}>
+        <button onClick={onLogout} style={{ background: 'none', border: 'none', color: '#374151', fontSize: '0.75rem', cursor: 'pointer', textDecoration: 'underline' }}>
+          Logout
+        </button>
+      </div>
 
       <style>{`
-        /* ── Shell ── */
-        .up-wrap {
-          display: flex;
-          flex-direction: column;
-          width: 100%;
-          max-width: 560px;       /* comfortable on laptop, full on phone */
-          min-height: 100dvh;
-          margin: 0 auto;
-          padding: 1rem 1rem 2rem;
-          gap: 0.85rem;
-          box-sizing: border-box;
-        }
-
-        /* ── Header bar ── */
-        .up-bar {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0.85rem 1.25rem;
-          background: rgba(255,255,255,0.04);
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 18px;
-          gap: 0.5rem;
-        }
-        .up-player-block { display: flex; align-items: center; gap: 0.75rem; flex: 1; min-width: 0; }
-        .up-avatar {
-          width: 38px; height: 38px; flex-shrink: 0;
-          border-radius: 10px;
-          background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-          display: flex; align-items: center; justify-content: center;
-          font-weight: 900; font-size: 1rem; color: white;
-        }
-        .up-mid-block { text-align: center; }
-        .up-right-block { text-align: right; flex: 1; }
-        .up-lbl {
-          font-size: 0.5rem; font-weight: 800;
-          letter-spacing: 2px; opacity: 0.35;
-          text-transform: uppercase; margin-bottom: 2px;
-        }
-        .up-pname {
-          font-weight: 800; font-size: 0.9rem;
-          color: #60a5fa;
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-          max-width: 130px;
-        }
-        .up-qbig {
-          font-family: 'Bangers', cursive;
-          font-size: 1.6rem; letter-spacing: 4px;
-          background: linear-gradient(135deg, #60a5fa, #a78bfa);
-          -webkit-background-clip: text; background-clip: text; color: transparent;
-          line-height: 1;
-        }
-        .up-pts { font-weight: 900; font-size: 1.05rem; color: #fbbf24; margin-bottom: 0.5rem; }
-        .up-logout-btn {
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.1);
-          color: var(--text-muted);
-          width: 32px; height: 32px;
-          border-radius: 8px;
-          display: inline-flex; align-items: center; justify-content: center;
-          cursor: pointer; transition: all 0.2s;
-          margin-top: 0.25rem;
-        }
-        .up-logout-btn:hover {
-          background: rgba(239, 68, 68, 0.1);
-          border-color: rgba(239, 68, 68, 0.3);
-          color: #ef4444;
-        }
-
-        /* ── Round + Question big block ── */
-        .up-rq-block {
-          text-align: center;
-          padding: 1rem 1rem 0.85rem;
-          background: rgba(255,255,255,0.025);
-          border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 16px;
-          display: flex; flex-direction: column; align-items: center; gap: 0.3rem;
-        }
-        .up-round-big {
-          font-family: 'Bangers', cursive;
-          font-size: clamp(1.8rem, 6vw, 2.8rem);
-          letter-spacing: 5px;
-          background: linear-gradient(90deg, #60a5fa, #a78bfa);
-          -webkit-background-clip: text; background-clip: text; color: transparent;
-          line-height: 1;
-        }
-        .up-question-big {
-          font-family: 'Bangers', cursive;
-          font-size: clamp(2.4rem, 9vw, 4rem);
-          letter-spacing: 6px;
-          color: white;
-          line-height: 1;
-          text-shadow: 0 0 30px rgba(255,255,255,0.15);
-        }
-        .up-status-pip { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.2rem; }
-        .up-round-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-        .up-status-txt { font-size: 0.58rem; font-weight: 800; letter-spacing: 2px; opacity: 0.4; }
-
-        /* ── Stage ── */
-        .up-stage {
-          flex: 1;
-          display: flex; align-items: center; justify-content: center;
-          min-height: 240px;
-        }
-
-        /* ── Idle rings ── */
-        .up-idle {
-          position: relative;
-          display: flex; flex-direction: column; align-items: center;
-        }
-        .up-ring {
-          position: absolute; top: 50%; left: 50%;
-          border-radius: 50%;
-          border: 1.5px solid rgba(99,102,241,0.3);
-          animation: upRing 3s ease-out infinite;
-        }
-        .up-ring.r1 { width: 80px;  height: 80px;  animation-delay: 0s; }
-        .up-ring.r2 { width: 80px;  height: 80px;  animation-delay: 1s; }
-        .up-ring.r3 { width: 80px;  height: 80px;  animation-delay: 2s; }
-        @keyframes upRing {
-          0%   { transform: translate(-50%,-50%) scale(0.6); opacity: 0.6; }
-          100% { transform: translate(-50%,-50%) scale(2.6); opacity: 0; }
-        }
-        .up-idle-core {
-          width: 12px; height: 12px; border-radius: 50%;
-          background: #818cf8;
-          box-shadow: 0 0 14px rgba(129,140,248,0.8);
-          margin-bottom: 60px;
-        }
-        .up-idle-txt {
-          margin-top: 0.6rem;
-          font-size: 0.75rem; font-weight: 700; opacity: 0.4; letter-spacing: 1px;
-        }
-
-        /* ── Buzzer ── */
-        .up-buzzer-wrap {
-          display: flex; flex-direction: column; align-items: center; gap: 1.5rem;
-        }
-        .up-buzzer {
-          /* size scales with viewport so it's big on laptop, good on phone */
-          width: clamp(170px, 38vw, 240px);
-          height: clamp(170px, 38vw, 240px);
-          border-radius: 50%;
-          border: none; cursor: pointer;
-          display: flex; align-items: center; justify-content: center;
-          transition: transform 0.07s ease, box-shadow 0.15s ease;
-          -webkit-tap-highlight-color: transparent;
-        }
-        .up-buzzer.ready {
-          background: radial-gradient(circle at 38% 32%, #f87171, #991b1b);
-          box-shadow:
-            0 0 0 clamp(10px,2vw,18px) rgba(239,68,68,0.10),
-            0 0 0 clamp(20px,4vw,34px) rgba(239,68,68,0.05),
-            0 0 clamp(40px,8vw,70px) rgba(239,68,68,0.45);
-        }
-        .up-buzzer.ready:hover  { transform: scale(1.04); }
-        .up-buzzer.ready:active { transform: scale(0.93); }
-        .up-buzzer.locked {
-          background: radial-gradient(circle at 38% 32%, #4b5563, #1f2937);
-          box-shadow: none; cursor: not-allowed; opacity: 0.5;
-        }
-        .up-bzlabel {
-          font-family: 'Bangers', cursive;
-          font-size: clamp(1.6rem, 5vw, 2.4rem);
-          letter-spacing: 4px; color: white;
-          pointer-events: none; user-select: none;
-        }
-        .up-hint {
-          font-size: 0.68rem; font-weight: 700;
-          letter-spacing: 0.5px; opacity: 0.4; text-align: center;
-          max-width: 280px;
-        }
-
-        /* ── Feed ── */
-        .up-feed {
-          padding: 1rem 1.1rem;
-          background: rgba(255,255,255,0.025);
-          border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 16px;
-        }
-        .up-feed-hdr {
-          font-size: 0.65rem; font-weight: 900;
-          letter-spacing: 2.5px; opacity: 0.35;
-          text-transform: uppercase; margin-bottom: 0.75rem;
-        }
-        .up-feed-empty { font-size: 0.8rem; opacity: 0.25; text-align: center; padding: 0.75rem; }
-        .up-feed-row {
-          display: flex; align-items: center; gap: 1rem;
-          padding: 0.75rem 1rem;
-          border-radius: 12px; font-size: 0.95rem;
-          transition: background 0.2s;
-        }
-        .up-feed-row.mine {
-          background: rgba(239,68,68,0.1);
-          border: 1px solid rgba(239,68,68,0.2);
-        }
-        .up-feed-rank { color: #60a5fa; font-weight: 900; width: 28px; }
-        .up-feed-name { flex: 1; font-weight: 700; }
-        .up-feed-you  {
-          font-size: 0.52rem; font-weight: 900;
-          background: #ef4444; color: white;
-          padding: 2px 6px; border-radius: 4px; letter-spacing: 1px;
-        }
-
-        /* ── Responsive: laptop gets bigger buzzer stage ── */
-        @media (min-width: 600px) {
-          .up-wrap { padding-top: 1.5rem; }
-          .up-stage { min-height: 300px; }
-          .up-bar { padding: 1rem 1.5rem; }
-          .up-pname { max-width: 180px; }
-        }
-
-        /* ── Very short phones ── */
-        @media (max-height: 650px) {
-          .up-stage { min-height: 180px; }
-          .up-feed { display: none; }  /* hide feed on tiny screens to save space */
-        }
+        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+        @keyframes scorePop { 0% { transform: scale(0.7); opacity:0; } 60% { transform: scale(1.2); } 100% { transform: scale(1); opacity:1; } }
       `}</style>
     </div>
   );
-};
-
-export default UserPage;
+}

@@ -1,0 +1,10 @@
+flask
+flask-socketio
+flask-cors
+pymongo[srv]
+firebase-admin
+bcrypt
+PyJWT
+python-engineio
+python-socketio
+eventlet

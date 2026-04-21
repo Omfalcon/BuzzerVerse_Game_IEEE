@@ -1,84 +1,127 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from './shared/firebase';
+import socket from './shared/socket';
 import LandingPage from './pages/LandingPage';
 import UserPage from './pages/UserPage';
 import AdminPage from './pages/AdminPage';
 import LeaderboardPage from './pages/LeaderboardPage';
 import './styles/global.css';
 
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 
-
-function App() {
-  const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('buzzer_user');
-    return saved ? JSON.parse(saved) : null;
-  });
-  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+export default function App() {
+  // view: 'loading' | 'landing' | 'register' | 'user' | 'admin' | 'leaderboard'
+  const [view, setView] = useState('loading');
+  const [user, setUser] = useState(null);         // {email, username, points, fbUser}
+  const [adminToken, setAdminToken] = useState(null);
+  const [pendingFbUser, setPendingFbUser] = useState(null);
 
   useEffect(() => {
-    const handleLocationChange = () => {
-      setCurrentPath(window.location.pathname);
-    };
-    window.addEventListener('popstate', handleLocationChange);
-    return () => window.removeEventListener('popstate', handleLocationChange);
+    // Check for a saved admin JWT first
+    const savedToken = localStorage.getItem('buzz_admin_token');
+    if (savedToken) {
+      try {
+        const { exp } = JSON.parse(atob(savedToken.split('.')[1]));
+        if (exp * 1000 > Date.now()) {
+          setAdminToken(savedToken);
+          socket.connect();
+          setView('admin');
+          return () => {};
+        }
+      } catch {}
+      localStorage.removeItem('buzz_admin_token');
+    }
+
+    // Listen for Firebase auth state (restores Google session after refresh)
+    const unsub = onAuthStateChanged(auth, async (fbUser) => {
+      if (!fbUser) {
+        setView('landing');
+        return;
+      }
+      try {
+        const idToken = await fbUser.getIdToken();
+        const res = await fetch(`${BACKEND}/auth/google`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id_token: idToken }),
+        });
+        const data = await res.json();
+        if (data.exists) {
+          setUser({ email: fbUser.email, username: data.username, points: data.points, fbUser });
+          socket.connect();
+          setView('user');
+        } else {
+          // Logged in with Google but not yet registered a username
+          setPendingFbUser(fbUser);
+          setView('register');
+        }
+      } catch {
+        setView('landing');
+      }
+    });
+
+    return unsub;
   }, []);
 
-  const handleLogin = (userData) => {
-    localStorage.setItem('buzzer_user', JSON.stringify(userData));
+  const onLogin = (userData) => {
     setUser(userData);
-    
-    if (userData.role === 'admin') {
-      history.pushState({}, '', '/admin');
-      setCurrentPath('/admin');
-    } else {
-      history.pushState({}, '', '/game');
-      setCurrentPath('/game');
-    }
+    setPendingFbUser(null);
+    socket.connect();
+    setView('user');
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('buzzer_user');
+  const onAdminLogin = (token) => {
+    setAdminToken(token);
+    localStorage.setItem('buzz_admin_token', token);
+    socket.connect();
+    setView('admin');
+  };
+
+  const onLogout = () => {
+    auth.signOut();
+    socket.disconnect();
     setUser(null);
-    history.pushState({}, '', '/');
-    setCurrentPath('/');
+    setAdminToken(null);
+    setPendingFbUser(null);
+    localStorage.removeItem('buzz_admin_token');
+    setView('landing');
   };
 
-
-
-  // Simple Router logic
-  if (currentPath === '/leaderboard') {
+  if (view === 'loading') {
     return (
-      <div className="layout-wrapper">
-        <main className="main-content">
-          <LeaderboardPage />
-          <div style={{ textAlign: 'center', padding: '2rem' }}>
-             <button className="back-link" onClick={() => { history.pushState({}, '', '/'); setCurrentPath('/'); }}>GO BACK</button>
-          </div>
-        </main>
+      <div className="landing-container">
+        <p style={{ color: 'var(--text-muted)', letterSpacing: '4px', fontSize: '0.75rem', fontWeight: 700 }}>
+          LOADING...
+        </p>
       </div>
     );
   }
 
-  if (!user) {
+  if (view === 'user' && user) {
     return (
-      <LandingPage 
-        onLogin={handleLogin} 
-        onPushLeaderboard={() => { history.pushState({}, '', '/leaderboard'); setCurrentPath('/leaderboard'); }} 
+      <UserPage
+        user={user}
+        onLogout={onLogout}
+        updatePoints={(p) => setUser((u) => ({ ...u, points: p }))}
       />
     );
   }
 
+  if (view === 'admin' && adminToken) {
+    return <AdminPage token={adminToken} onLogout={onLogout} />;
+  }
+
+  if (view === 'leaderboard') {
+    return <LeaderboardPage onBack={() => setView('landing')} />;
+  }
+
   return (
-    <div className="layout-wrapper">
-      <main className="main-content">
-        {user.role === 'admin' ? (
-          <AdminPage userData={user} onLogout={handleLogout} />
-        ) : (
-          <UserPage userData={user} onLogout={handleLogout} />
-        )}
-      </main>
-    </div>
+    <LandingPage
+      onLogin={onLogin}
+      onAdminLogin={onAdminLogin}
+      onViewLeaderboard={() => setView('leaderboard')}
+      pendingFbUser={view === 'register' ? pendingFbUser : null}
+    />
   );
 }
-
-export default App;
-

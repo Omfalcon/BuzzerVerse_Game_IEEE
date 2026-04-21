@@ -1,173 +1,91 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { Trophy, Medal, Star, ArrowLeft } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import socket from '../shared/socket';
 
-const API_BASE = "https://deployment.zapto.org";
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 
-const LeaderboardPage = () => {
-  const [standings, setStandings] = useState({});
+export default function LeaderboardPage({ onBack }) {
+  const [leaderboard, setLeaderboard] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchStandings();
-    const interval = setInterval(fetchStandings, 1000); // Updated to max (1s polling)
-    return () => clearInterval(interval);
-  }, []);
-
-  const fetchStandings = async () => {
+  const fetchLB = async () => {
     try {
-      const res = await fetch(`${API_BASE}/leaderboard`);
-      const data = await res.json();
-      setStandings(data);
-    } catch (e) {
-      console.error("Failed to fetch standings");
-    } finally {
-      setLoading(false);
-    }
+      const res = await fetch(`${BACKEND}/leaderboard`);
+      setLeaderboard(await res.json());
+    } catch {}
+    setLoading(false);
   };
 
-  const sortedUsers = Object.entries(standings)
-    .sort(([, a], [, b]) => b - a)
-    .map(([name, points]) => ({ name, points }));
+  useEffect(() => {
+    fetchLB();
+
+    const onRoundReset = ({ leaderboard: lb }) => setLeaderboard(lb);
+    const onGameEnded = ({ leaderboard: lb }) => setLeaderboard(lb);
+
+    socket.on('round_reset', onRoundReset);
+    socket.on('game_ended', onGameEnded);
+
+    // Fallback polling every 8s
+    const interval = setInterval(fetchLB, 8000);
+
+    return () => {
+      socket.off('round_reset', onRoundReset);
+      socket.off('game_ended', onGameEnded);
+      clearInterval(interval);
+    };
+  }, []);
 
   return (
-    <div className="leaderboard-container">
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="glass-card l-card"
-      >
-        <div className="l-header">
-          <Trophy className="gold" size={48} />
-          <h1 className="l-title">BUZZERVERSE ELITE</h1>
-          <p className="l-subtitle">GLOBAL HALL OF FAME</p>
+    <div style={{ minHeight: '100vh', padding: '2rem', maxWidth: '580px', margin: '0 auto' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '2.5rem' }}>
+        {onBack && (
+          <button onClick={onBack} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', color: 'var(--text-muted)', padding: '0.5rem 0.75rem', borderRadius: '10px', cursor: 'pointer', fontSize: '1rem', lineHeight: 1 }}>←</button>
+        )}
+        <div>
+          <h1 style={{ fontFamily: 'Bangers', fontSize: '2.75rem', letterSpacing: '5px', background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent', lineHeight: 1 }}>
+            LEADERBOARD
+          </h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '3px', fontWeight: 700, marginTop: '0.2rem' }}>
+            Live standings · IEEE BuzzerVerse
+          </p>
         </div>
+      </div>
 
-        <div className="l-stats">
-          <div className="l-stat">
-            <span className="l-label">TOTAL CONTENDERS</span>
-            <span className="l-value">{sortedUsers.length}</span>
-          </div>
-        </div>
+      {loading ? (
+        <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '4rem 0' }}>Loading...</p>
+      ) : leaderboard.length === 0 ? (
+        <p style={{ textAlign: 'center', color: '#374151', padding: '4rem 0' }}>No participants yet</p>
+      ) : (
+        <>
+          {/* Top 3 podium style */}
+          {leaderboard.slice(0, 3).map((u, i) => (
+            <div key={u.username} style={{
+              display: 'flex', alignItems: 'center', gap: '1rem',
+              padding: '1.1rem 1.5rem',
+              background: i === 0 ? 'rgba(251,191,36,0.08)' : i === 1 ? 'rgba(156,163,175,0.06)' : 'rgba(180,120,60,0.06)',
+              border: `1px solid ${i === 0 ? 'rgba(251,191,36,0.2)' : i === 1 ? 'rgba(156,163,175,0.15)' : 'rgba(180,120,60,0.15)'}`,
+              borderRadius: '14px', marginBottom: '0.75rem',
+            }}>
+              <span style={{ fontSize: '1.75rem', minWidth: '40px', textAlign: 'center' }}>
+                {i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}
+              </span>
+              <span style={{ flex: 1, fontWeight: 800, fontSize: '1.05rem' }}>{u.username}</span>
+              <span style={{ color: i === 0 ? '#fbbf24' : i === 1 ? '#9ca3af' : '#cd7f32', fontFamily: 'Bangers', fontSize: '1.5rem', letterSpacing: '1px' }}>
+                {u.points}
+              </span>
+            </div>
+          ))}
 
-        <div className="l-list">
-          {loading ? (
-            <div className="l-loading">FETCHING DATA...</div>
-          ) : sortedUsers.length === 0 ? (
-            <div className="l-empty">NO DATA IN THE ARCHIVES</div>
-          ) : (
-            sortedUsers.map((user, index) => (
-              <motion.div 
-                initial={{ x: -20, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                transition={{ delay: index * 0.05 }}
-                key={user.name} 
-                className={`l-item rank-${index + 1}`}
-              >
-                <div className="l-rank">
-                  {index === 0 ? <Medal size={24} color="#fbbf24" /> : 
-                   index === 1 ? <Medal size={24} color="#94a3b8" /> : 
-                   index === 2 ? <Medal size={24} color="#b45309" /> : 
-                   `#${index + 1}`}
-                </div>
-                <div className="l-info">
-                  <span className="l-name">{user.name}</span>
-                  <span className="l-badge">VERIFIED PLAYER</span>
-                </div>
-                <div className="l-points">
-                  <span className="p-val">{user.points}</span>
-                  <span className="p-unit">PTS</span>
-                </div>
-              </motion.div>
-            ))
-          )}
-        </div>
-      </motion.div>
-
-      <style>{`
-        .leaderboard-container {
-          width: 100%;
-          max-width: 600px;
-          margin: 0 auto;
-          padding: 2rem 1rem;
-        }
-        .l-card {
-          padding: 2.5rem;
-          border-radius: 30px;
-          display: flex;
-          flex-direction: column;
-          gap: 2rem;
-        }
-        .l-header {
-          text-align: center;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 0.5rem;
-        }
-        .l-title {
-          font-family: 'Bangers';
-          font-size: 3rem;
-          letter-spacing: 4px;
-          background: linear-gradient(to bottom, #fff, #94a3b8);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-        }
-        .l-subtitle {
-          font-size: 0.7rem;
-          font-weight: 900;
-          letter-spacing: 5px;
-          color: var(--accent-primary);
-          opacity: 0.8;
-        }
-        .l-stats {
-          display: flex;
-          justify-content: center;
-          border-top: 1px solid rgba(255,255,255,0.05);
-          border-bottom: 1px solid rgba(255,255,255,0.05);
-          padding: 1rem 0;
-        }
-        .l-stat {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-        }
-        .l-label { font-size: 0.6rem; font-weight: 900; opacity: 0.4; letter-spacing: 2px; }
-        .l-value { font-weight: 900; font-size: 1.2rem; }
-
-        .l-list {
-          display: flex;
-          flex-direction: column;
-          gap: 0.75rem;
-        }
-        .l-item {
-          display: flex;
-          align-items: center;
-          gap: 1.5rem;
-          padding: 1.25rem 1.5rem;
-          background: rgba(255,255,255,0.02);
-          border-radius: 16px;
-          border: 1px solid rgba(255,255,255,0.05);
-          transition: transform 0.2s;
-        }
-        .l-item:hover {
-          transform: translateX(10px);
-          background: rgba(255,255,255,0.05);
-        }
-        .l-item.rank-1 { background: rgba(251, 191, 36, 0.05); border-color: rgba(251, 191, 36, 0.2); }
-        .l-rank { width: 40px; font-weight: 900; font-size: 1.1rem; opacity: 0.5; text-align: center; }
-        .l-info { flex: 1; display: flex; flex-direction: column; }
-        .l-name { font-weight: 800; font-size: 1.1rem; }
-        .l-badge { font-size: 0.5rem; font-weight: 900; letter-spacing: 1px; color: var(--accent-secondary); margin-top: 2px; }
-        .l-points { display: flex; align-items: baseline; gap: 4px; }
-        .p-val { font-weight: 900; font-size: 1.5rem; color: #fbbf24; }
-        .p-unit { font-size: 0.6rem; font-weight: 800; opacity: 0.6; }
-        
-        .l-loading, .l-empty { text-align: center; padding: 3rem; opacity: 0.3; font-weight: 900; letter-spacing: 2px; }
-      `}</style>
+          {/* Rest */}
+          {leaderboard.slice(3).map((u, i) => (
+            <div key={u.username} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.875rem 1.5rem', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px', marginBottom: '0.5rem' }}>
+              <span style={{ color: 'var(--text-muted)', fontWeight: 800, fontSize: '0.85rem', minWidth: '40px', textAlign: 'center' }}>#{i + 4}</span>
+              <span style={{ flex: 1, color: '#d1d5db' }}>{u.username}</span>
+              <span style={{ color: 'var(--text-muted)', fontFamily: 'Bangers', fontSize: '1.1rem', letterSpacing: '1px' }}>{u.points}</span>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
-};
-
-export default LeaderboardPage;
-
+}
