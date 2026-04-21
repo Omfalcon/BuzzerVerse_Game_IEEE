@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import socket from '../shared/socket';
 
-const BACKEND = import.meta.env.VITE_BACKEND_URL || 'https://deployment.zapto.org';
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'https://deploy.bhook.food';
 
 const card = {
   background: 'rgba(17,24,39,0.7)',

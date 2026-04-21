@@ -8,7 +8,7 @@ import AdminPage from './pages/AdminPage';
 import LeaderboardPage from './pages/LeaderboardPage';
 import './styles/global.css';
 
-const BACKEND = import.meta.env.VITE_BACKEND_URL || 'https://deployment.zapto.org';
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'https://deploy.bhook.food';
 
 export default function App() {
   // view: 'loading' | 'landing' | 'register' | 'user' | 'admin' | 'leaderboard'

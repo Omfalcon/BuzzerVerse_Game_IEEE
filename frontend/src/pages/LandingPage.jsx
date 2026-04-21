@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { signInWithPopup } from 'firebase/auth';
 import { auth, googleProvider } from '../shared/firebase';
 
-const BACKEND = import.meta.env.VITE_BACKEND_URL || 'https://deployment.zapto.org';
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'https://deploy.bhook.food';
 
 const GoogleLogo = () => (
   <svg width="20" height="20" viewBox="0 0 48 48" style={{ flexShrink: 0 }}>

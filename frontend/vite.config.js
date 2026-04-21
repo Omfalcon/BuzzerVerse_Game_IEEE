@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/socket.io': {
-        target: 'https://deployment.zapto.org',
+        target: 'https://deploy.bhook.food',
         ws: true,
         changeOrigin: true,
       },
