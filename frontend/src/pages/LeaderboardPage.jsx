@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import socket from '../shared/socket';
 
-const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'https://deployment.zapto.org';
 
 export default function LeaderboardPage({ onBack }) {
   const [leaderboard, setLeaderboard] = useState([]);

@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/socket.io': {
-        target: 'http://localhost:5000',
+        target: 'https://deployment.zapto.org',
         ws: true,
         changeOrigin: true,
       },

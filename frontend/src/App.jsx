@@ -8,7 +8,7 @@ import AdminPage from './pages/AdminPage';
 import LeaderboardPage from './pages/LeaderboardPage';
 import './styles/global.css';
 
-const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'https://deployment.zapto.org';
 
 export default function App() {
   // view: 'loading' | 'landing' | 'register' | 'user' | 'admin' | 'leaderboard'
